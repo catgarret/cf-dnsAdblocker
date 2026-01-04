@@ -12,55 +12,94 @@ jobs:
   cgps:
     runs-on: ubuntu-latest
     steps:
-    - name: Install Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version: 16
-    
-    - name: Clone repository and switch to v1 branch
-      run: |
-        git clone https://github.com/mrrfv/cloudflare-gateway-pihole-scripts.git
-        cd cloudflare-gateway-pihole-scripts
-        git checkout v1
+      - name: Install Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 16
 
-    - name: Install npm dependencies
-      run: npm ci
-      working-directory: cloudflare-gateway-pihole-scripts
-      
-    - name: Download recommended whitelist
-      run: bash ./get_recommended_whitelist.sh
-      working-directory: cloudflare-gateway-pihole-scripts
-      
-    - name: Download recommended filters
-      run: bash ./get_recommended_filters.sh
-      working-directory: cloudflare-gateway-pihole-scripts
-    
-    - name: Delete old rules and lists
-      run: |
-        node cf_gateway_rule_delete.js
-        node cf_list_delete.js
-      working-directory: cloudflare-gateway-pihole-scripts
-      env:
-        CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
-        CLOUDFLARE_ACCOUNT_EMAIL: ${{ secrets.CLOUDFLARE_ACCOUNT_EMAIL }}
-        CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        CLOUDFLARE_LIST_ITEM_LIMIT: ${{ secrets.CLOUDFLARE_LIST_ITEM_LIMIT }}
+      - name: Clone repository and switch to v1 branch
+        run: |
+          git clone https://github.com/mrrfv/cloudflare-gateway-pihole-scripts.git
+          cd cloudflare-gateway-pihole-scripts
+          git checkout v1
 
-    - name: Create new rules and lists
-      run: |
-        node cf_list_create.js
-        node cf_gateway_rule_create.js
-      working-directory: cloudflare-gateway-pihole-scripts
-      env:
-        CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
-        CLOUDFLARE_ACCOUNT_EMAIL: ${{ secrets.CLOUDFLARE_ACCOUNT_EMAIL }}
-        CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        CLOUDFLARE_LIST_ITEM_LIMIT: ${{ secrets.CLOUDFLARE_LIST_ITEM_LIMIT }}
+      - name: Install npm dependencies
+        run: npm ci
+        working-directory: cloudflare-gateway-pihole-scripts
 
-    - name: Send ping request
-      if: env.PING_URL != ''
-      working-directory: cloudflare-gateway-pihole-scripts
-      env:
-        PING_URL: ${{ secrets.PING_URL }}
-      run: |
-        curl "${{ env.PING_URL }}"
+      - name: Download recommended whitelist
+        run: bash ./get_recommended_whitelist.sh
+        working-directory: cloudflare-gateway-pihole-scripts
+
+      - name: Download recommended filters
+        run: bash ./get_recommended_filters.sh
+        working-directory: cloudflare-gateway-pihole-scripts
+
+      # ✅ 추천 + (사용자 커스텀) blocklist URL들을 추가로 받아서 합침
+      # - 커스텀 URL은 GitHub Settings → Secrets and variables → Actions → Variables
+      #   에서 BLOCKLIST_URLS 로 관리 (한 줄에 URL 하나)
+      - name: Append custom blocklists from repository variable (BLOCKLIST_URLS)
+        if: ${{ vars.BLOCKLIST_URLS != '' }}
+        working-directory: cloudflare-gateway-pihole-scripts
+        env:
+          BLOCKLIST_URLS: ${{ vars.BLOCKLIST_URLS }}
+        run: |
+          set -euo pipefail
+
+          TARGET="blocklist.txt"
+          touch "$TARGET"
+
+          echo "== Recommended blocklist already downloaded. Current lines: $(wc -l < "$TARGET") =="
+
+          echo "== BLOCKLIST_URLS (raw) =="
+          printf "%s\n" "$BLOCKLIST_URLS"
+
+          echo "== Appending custom blocklists to $TARGET =="
+
+          # BLOCKLIST_URLS: 한 줄에 URL 하나 (빈 줄/주석 라인 허용)
+          while IFS= read -r url; do
+            # trim
+            url="$(echo "$url" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+            # skip empty / comment lines
+            [ -z "$url" ] && continue
+            case "$url" in
+              \#*|\;*|\!*) continue ;;
+            esac
+
+            echo "Downloading: $url"
+            curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 20 "$url" >> "$TARGET"
+            echo "" >> "$TARGET"
+          done <<< "$BLOCKLIST_URLS"
+
+          echo "== After append: $(wc -l < "$TARGET") lines in $TARGET =="
+          echo "Note: Upload 단계에서 스크립트가 중복/정리 처리를 수행합니다."
+
+      - name: Delete old rules and lists
+        run: |
+          node cf_gateway_rule_delete.js
+          node cf_list_delete.js
+        working-directory: cloudflare-gateway-pihole-scripts
+        env:
+          CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
+          CLOUDFLARE_ACCOUNT_EMAIL: ${{ secrets.CLOUDFLARE_ACCOUNT_EMAIL }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_LIST_ITEM_LIMIT: ${{ secrets.CLOUDFLARE_LIST_ITEM_LIMIT }}
+
+      - name: Create new rules and lists
+        run: |
+          node cf_list_create.js
+          node cf_gateway_rule_create.js
+        working-directory: cloudflare-gateway-pihole-scripts
+        env:
+          CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
+          CLOUDFLARE_ACCOUNT_EMAIL: ${{ secrets.CLOUDFLARE_ACCOUNT_EMAIL }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_LIST_ITEM_LIMIT: ${{ secrets.CLOUDFLARE_LIST_ITEM_LIMIT }}
+
+      - name: Send ping request
+        if: env.PING_URL != ''
+        working-directory: cloudflare-gateway-pihole-scripts
+        env:
+          PING_URL: ${{ secrets.PING_URL }}
+        run: |
+          curl "${{ env.PING_URL }}"
