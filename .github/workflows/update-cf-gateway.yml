@@ -13,9 +13,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4  # v3에서 v4로 업데이트 (Node.js 20/24 경고 해결)
         with:
-          node-version: 16
+          node-version: 20           # 16은 완전히 단종되었으므로 20으로 업데이트 (필요시 24로 변경 가능)
 
       - name: Clone repository and switch to v1 branch
         run: |
