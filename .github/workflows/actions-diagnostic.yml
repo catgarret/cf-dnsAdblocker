@@ -1,0 +1,14 @@
+name: Actions runner diagnostic
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo "GitHub Actions runner is working"
