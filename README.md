@@ -4,7 +4,7 @@ Uses GitHub Actions to automatically refresh Cloudflare Gateway ad-blocking list
 
 ## Schedule
 
-The workflow runs every Monday at 03:00 UTC and can also be started manually from GitHub Actions.
+The workflow runs every Monday at 03:07 UTC and can also be started manually from GitHub Actions.
 
 A keepalive job is included because GitHub may automatically disable scheduled workflows in inactive public repositories.
 
