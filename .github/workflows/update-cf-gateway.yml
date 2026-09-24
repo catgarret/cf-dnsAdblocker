@@ -2,88 +2,74 @@ name: Update Cloudflare Gateway filter lists
 
 on:
   schedule:
-    - cron: '0 3 * * 1'
+    - cron: "0 3 * * 1"
   push:
     branches:
-      - '**'
+      - main
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_ENV: production
 
 jobs:
   cgps:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - name: Install Node.js
-        uses: actions/setup-node@v4  # v3에서 v4로 업데이트 (Node.js 20/24 경고 해결)
+      - name: Checkout CGPS upstream
+        uses: actions/checkout@v6
         with:
-          node-version: 20           # 16은 완전히 단종되었으므로 20으로 업데이트 (필요시 24로 변경 가능)
+          repository: mrrfv/cloudflare-gateway-pihole-scripts
+          ref: v1
 
-      - name: Clone repository and switch to v1 branch
-        run: |
-          git clone https://github.com/mrrfv/cloudflare-gateway-pihole-scripts.git
-          cd cloudflare-gateway-pihole-scripts
-          git checkout v1
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "lts/*"
+          cache: npm
 
       - name: Install npm dependencies
         run: npm ci
-        working-directory: cloudflare-gateway-pihole-scripts
 
-      - name: Download recommended whitelist
-        run: bash ./get_recommended_whitelist.sh
-        working-directory: cloudflare-gateway-pihole-scripts
+      - name: Download allowlists
+        run: npm run download:allowlist
+        env:
+          ALLOWLIST_URLS: ${{ vars.ALLOWLIST_URLS }}
 
-      - name: Download recommended filters
-        run: bash ./get_recommended_filters.sh
-        working-directory: cloudflare-gateway-pihole-scripts
-
-      - name: Append custom blocklists from repository variable (BLOCKLIST_URLS)
-        if: ${{ vars.BLOCKLIST_URLS != '' }}
-        working-directory: cloudflare-gateway-pihole-scripts
+      - name: Download blocklists
+        run: npm run download:blocklist
         env:
           BLOCKLIST_URLS: ${{ vars.BLOCKLIST_URLS }}
-        run: |
-          set -euo pipefail
-          TARGET="blocklist.txt"
-          touch "$TARGET"
 
-          echo "== Current lines (recommended already applied): $(wc -l < "$TARGET") =="
-
-          while IFS= read -r url; do
-            url="$(echo "$url" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-            [ -z "$url" ] && continue
-            case "$url" in
-              \#*|\;*|\!*) continue ;;
-            esac
-            echo "Downloading: $url"
-            curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 20 "$url" >> "$TARGET"
-            echo "" >> "$TARGET"
-          done <<< "$BLOCKLIST_URLS"
-
-          echo "== After append: $(wc -l < "$TARGET") lines in $TARGET =="
-
-      - name: Delete old rules and lists
-        run: |
-          node cf_gateway_rule_delete.js
-          node cf_list_delete.js
-        working-directory: cloudflare-gateway-pihole-scripts
+      - name: Create or update rules and lists
+        run: npm run cloudflare-create
         env:
+          BLOCK_PAGE_ENABLED: ${{ vars.BLOCK_PAGE_ENABLED }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_LIST_ITEM_LIMIT: ${{ secrets.CLOUDFLARE_LIST_ITEM_LIMIT }}
-
-      - name: Create new rules and lists
-        run: |
-          node cf_list_create.js
-          node cf_gateway_rule_create.js
-        working-directory: cloudflare-gateway-pihole-scripts
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_LIST_ITEM_LIMIT: ${{ secrets.CLOUDFLARE_LIST_ITEM_LIMIT }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
 
       - name: Send ping request
         if: env.PING_URL != ''
-        working-directory: cloudflare-gateway-pihole-scripts
         env:
           PING_URL: ${{ secrets.PING_URL }}
-        run: |
-          curl "${{ env.PING_URL }}"
+        run: curl --fail --show-error --silent --retry 3 --retry-delay 2 "${PING_URL}"
+
+  keepalive:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Keep scheduled workflow active
+        uses: liskin/gh-workflow-keepalive@v1
