@@ -60,6 +60,7 @@ fi
 install -m 0755 "${BIN}" /usr/local/bin/dnsproxy
 
 install -d -m 0755 /etc/tailscale-dnsproxy
+install -d -m 0755 /usr/local/libexec
 printf '%s\n' "${DOH_URL}" > /etc/tailscale-dnsproxy/upstream-url
 chmod 0600 /etc/tailscale-dnsproxy/upstream-url
 
