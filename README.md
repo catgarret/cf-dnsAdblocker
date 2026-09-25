@@ -2,6 +2,8 @@
 
 Full rebuild / troubleshooting guide: [`docs/TAILSCALE_DNS_ADBLOCK.md`](docs/TAILSCALE_DNS_ADBLOCK.md)
 
+Selective Korea `warning.or.kr` bypass without enabling an Exit Node: [`docs/TAILSCALE_WARNING_BYPASS.md`](docs/TAILSCALE_WARNING_BYPASS.md)
+
 Cloudflare Gateway DNS filtering + a Tailscale-only DNS relay.
 
 ## Cloudflare Gateway filter refresh
