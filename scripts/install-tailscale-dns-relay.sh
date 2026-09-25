@@ -107,6 +107,21 @@ exec /usr/local/bin/dnsproxy \
 RUNNER
 chmod 0755 /usr/local/libexec/tailscale-dnsproxy-run
 
+# Preflight: port 53 on the Tailscale IP must be free.  Do not silently kill an
+# existing DNS server; print the owner so the operator can decide whether to
+# integrate with or replace it.
+if ss -H -lntup 2>/dev/null | grep -Fq "${TS_IP}:53"; then
+  echo >&2
+  echo "Port 53 on ${TS_IP} is already in use:" >&2
+  ss -H -lntup 2>/dev/null | grep -F "${TS_IP}:53" >&2 || true
+  echo >&2
+  echo "Also showing all listeners on :53 for context:" >&2
+  ss -H -lntup 2>/dev/null | grep -E '(^|:)53([[:space:]]|$)' >&2 || true
+  echo >&2
+  echo "Refusing to stop or overwrite the existing DNS service automatically." >&2
+  exit 2
+fi
+
 cat >/etc/systemd/system/tailscale-dnsproxy.service <<'UNIT'
 [Unit]
 Description=Tailscale-only DNS relay to Cloudflare Gateway DoH
@@ -134,6 +149,8 @@ WantedBy=multi-user.target
 UNIT
 
 systemctl daemon-reload
+systemctl stop tailscale-dnsproxy.service 2>/dev/null || true
+systemctl reset-failed tailscale-dnsproxy.service 2>/dev/null || true
 systemctl enable --now tailscale-dnsproxy.service
 
 # Give systemd a moment to surface bind/TLS/config errors.
