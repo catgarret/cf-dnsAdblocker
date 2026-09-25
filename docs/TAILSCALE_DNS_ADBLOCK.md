@@ -426,3 +426,31 @@ sudo bash /tmp/install-tailscale-warning-bypass.sh
 
 Then ensure the US node's advertised subnet routes are approved (or covered by an `autoApprovers.routes` policy).  Clients keep **Exit Node = None**; only matching destination IPs use the US subnet router.
 
+
+
+## 14. Repoint KR AdGuard Home to the existing Cloudflare Gateway forwarder
+
+The existing KR AdGuard Home listener originally used multiple public resolvers
+in parallel.  To make KR and US apply the same Cloudflare Gateway policy, use
+the existing `dns-forwarder` container as the sole AdGuard Home upstream.
+
+Run on KR:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/catgarret/cf-dnsAdblocker/main/scripts/configure-kr-adguard-upstream.sh \
+  -o /tmp/configure-kr-adguard-upstream.sh && \
+sudo bash /tmp/configure-kr-adguard-upstream.sh
+```
+
+The helper auto-detects the current `dns-forwarder` container IP, tests it,
+backs up `AdGuardHome.yaml`, replaces only `upstream_dns`, restarts the
+container, and verifies DNS through the KR Tailscale address.
+
+At the time of inspection, the forwarder address was `172.19.0.6`, but the
+script intentionally re-detects it because Docker bridge addresses can change
+after recreation.
+
+A previous test of `app-measurement.com` through KR returned `0.0.0.0`.
+That confirms filtering at the AdGuard Home layer, but does not by itself prove
+that the query traversed Cloudflare Gateway; repointing the upstream makes the
+Gateway path deterministic.
