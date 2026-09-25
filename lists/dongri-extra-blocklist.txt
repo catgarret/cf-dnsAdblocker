@@ -1,0 +1,8 @@
+wcs.naver.com
+serv.ds.kakao.com
+ka.ds.kakao.com
+tr.ds.kakao.com
+kakaoad.com
+app-ad.tiara.kakao.com
+incoming.telemetry.mozilla.org
+app-measurement.com
