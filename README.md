@@ -1,5 +1,7 @@
 # cf-dnsAdblocker
 
+Full rebuild / troubleshooting guide: [`docs/TAILSCALE_DNS_ADBLOCK.md`](docs/TAILSCALE_DNS_ADBLOCK.md)
+
 Cloudflare Gateway DNS filtering + a Tailscale-only DNS relay.
 
 ## Cloudflare Gateway filter refresh
