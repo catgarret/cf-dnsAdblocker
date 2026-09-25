@@ -88,17 +88,24 @@ DOMAIN_COUNT="$(wc -l < "$TMP/domains.txt")"
 echo "Resolving ${DOMAIN_COUNT} domains..."
 
 resolve_one() {
-  d="$1"
+  idx="$1"
+  d="$2"
   for r in $RESOLVER_IPS; do
     dig @"$r" +time=2 +tries=1 +short A "$d" 2>/dev/null       | awk -v d="$d" -v r="$r" 'NF {print "4", $0, d, r}'
     dig @"$r" +time=2 +tries=1 +short AAAA "$d" 2>/dev/null       | awk -v d="$d" -v r="$r" 'NF {print "6", $0, d, r}'
   done
+
+  # Progress goes to stderr so DNS results can still be redirected cleanly.
+  if (( idx % 25 == 0 || idx == DOMAIN_COUNT )); then
+    echo "  DNS resolution progress: ${idx}/${DOMAIN_COUNT}" >&2
+  fi
 }
 export -f resolve_one
-export RESOLVER_IPS
+export RESOLVER_IPS DOMAIN_COUNT
 
 echo "Using client-facing resolvers: $RESOLVER_IPS"
-xargs -r -n1 -P32 bash -c 'resolve_one "$1"' _ < "$TMP/domains.txt"   > "$TMP/resolved.raw" || true
+echo "This step can take a few minutes; progress will be printed every 25 domains."
+nl -ba -w1 -s' ' "$TMP/domains.txt"   | xargs -r -n2 -P32 bash -c 'resolve_one "$1" "$2"' _   > "$TMP/resolved.raw" || true
 
 python3 - "$TMP/resolved.raw" "$TMP/routes.txt" <<'PY'
 import ipaddress, sys
@@ -215,10 +222,14 @@ EOF
 sysctl --system >/dev/null
 
 systemctl daemon-reload
-systemctl enable --now tailscale-warning-bypass.timer
 
-# Run once now.
-systemctl start tailscale-warning-bypass.service
+echo
+echo "Running the first route refresh in the foreground so progress is visible..."
+/usr/local/libexec/tailscale-warning-bypass-refresh
+
+echo
+echo "Enabling hourly refresh timer..."
+systemctl enable --now tailscale-warning-bypass.timer
 
 echo
 echo "============================================================"
