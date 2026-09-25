@@ -110,3 +110,16 @@ Get the KR Tailscale IPv4 after installation with:
 ```bash
 tailscale ip -4 | head -n1
 ```
+
+
+### KR note
+
+KR already runs AdGuard Home on `100.121.219.35:53`. Do not install a second host-level DNS relay there.
+
+If the host relay installer was previously attempted and failed due to port 53 already being in use, clean up only those host-level artifacts with:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/catgarret/cf-dnsAdblocker/main/scripts/cleanup-host-tailscale-dns-relay.sh \
+  -o /tmp/cleanup-host-tailscale-dns-relay.sh && \
+sudo bash /tmp/cleanup-host-tailscale-dns-relay.sh
+```
