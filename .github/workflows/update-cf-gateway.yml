@@ -2,15 +2,15 @@ name: Update Cloudflare Gateway filter lists
 
 on:
   schedule:
-    - cron: "7 3 * * 1"
+    # Daily at 03:17 UTC (12:17 KST). Upstream also has an open request
+    # to move the default schedule from weekly to daily.
+    - cron: "17 3 * * *"
   push:
     branches:
       - main
+    paths:
+      - ".github/workflows/update-cf-gateway.yml"
   workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -21,15 +21,15 @@ env:
 jobs:
   cgps:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
-      - name: Checkout CGPS upstream
+      - name: Checkout current CGPS v1
         uses: actions/checkout@v6
         with:
           repository: mrrfv/cloudflare-gateway-pihole-scripts
           ref: v1
 
-      - name: Install Node.js
+      - name: Install current Node.js LTS
         uses: actions/setup-node@v6
         with:
           node-version: "lts/*"
@@ -48,7 +48,14 @@ jobs:
         env:
           BLOCKLIST_URLS: ${{ vars.BLOCKLIST_URLS }}
 
-      - name: Create or update rules and lists
+      - name: Show generated list statistics
+        shell: bash
+        run: |
+          echo "blocklist lines: $(wc -l < blocklist.txt 2>/dev/null || echo 0)"
+          echo "allowlist lines: $(wc -l < allowlist.txt 2>/dev/null || echo 0)"
+          du -h blocklist.txt allowlist.txt 2>/dev/null || true
+
+      - name: Create or update Cloudflare Gateway rules and lists
         run: npm run cloudflare-create
         env:
           BLOCK_PAGE_ENABLED: ${{ vars.BLOCK_PAGE_ENABLED }}
@@ -57,8 +64,8 @@ jobs:
           CLOUDFLARE_LIST_ITEM_LIMIT: ${{ secrets.CLOUDFLARE_LIST_ITEM_LIMIT }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
 
-      - name: Send ping request
-        if: env.PING_URL != ''
+      - name: Send health-check ping
+        if: ${{ success() && secrets.PING_URL != '' }}
         env:
           PING_URL: ${{ secrets.PING_URL }}
         run: curl --fail --show-error --silent --retry 3 --retry-delay 2 "${PING_URL}"
