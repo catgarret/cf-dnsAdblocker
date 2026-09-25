@@ -96,6 +96,8 @@ exec /usr/local/bin/dnsproxy \
   --upstream="$DOH_URL" \
   --bootstrap=1.1.1.1:53 \
   --bootstrap=8.8.8.8:53 \
+  --fallback=https://cloudflare-dns.com/dns-query \
+  --fallback=https://dns.google/dns-query \
   --cache \
   --cache-size=4194304 \
   --cache-optimistic \
