@@ -291,3 +291,42 @@ dig @<KR_OR_US_TAILSCALE_IP> example.com A +short
 
 If DNS works and ordinary Internet access works, the warning may be cosmetic. If DNS actually fails, check both relay services and Tailscale reachability.
 
+
+
+## 13. Existing KR DNS stack detected
+
+On the KR node, port 53 is already published by Docker and a DNS query to the
+node's Tailscale address succeeds.  The observed stack is:
+
+```text
+AdGuard Home container
+  - publishes TCP/UDP 53 on 0.0.0.0 and [::]
+  - therefore already answers on the node's Tailscale IPv4
+
+dns-forwarder container
+  - AdGuardTeam/dnsproxy image
+  - likely used as an internal encrypted upstream/forwarder
+
+cloudflared container
+  - existing Cloudflare tunnel / DNS-related component
+```
+
+For this node, do **not** run a second systemd `tailscale-dnsproxy` on port 53.
+Reuse the existing AdGuard Home listener and point its upstream chain at the same
+Cloudflare Gateway DoH policy used by the US relay.
+
+Known KR tailnet resolver address at the time of setup:
+
+```text
+100.121.219.35
+```
+
+Known US tailnet resolver address:
+
+```text
+100.94.3.111
+```
+
+The installer has been updated so that if port 53 is already occupied *and* the
+existing resolver successfully answers through the node's Tailscale address, it
+exits successfully without killing or replacing that service.
