@@ -471,3 +471,37 @@ both a normal domain and a known blocked domain.
 
 The existing `dns-forwarder` container is intentionally left untouched because
 it can continue serving `dns.dongri.me` independently.
+
+
+## 15. Final Tailscale global nameservers
+
+Do **not** keep the Cloudflare Gateway location IPv4 endpoints
+`172.64.36.1` and `172.64.36.2` as Tailscale global nameservers.
+
+That Cloudflare location authenticates direct IPv4 DNS by the registered source
+IPv4 address.  It was configured for the KR/home public source address at setup
+time, so a roaming Galaxy/iPhone on LTE or another Wi-Fi can have a different
+public source address.  In addition, Tailscale/OS resolver selection is not a
+strict primary/secondary sequence and multiple global resolvers can be queried
+or reordered.
+
+The final Tailscale DNS list should therefore be only:
+
+```text
+100.121.219.35   # KR AdGuard Home -> Cloudflare Gateway DoH
+100.94.3.111     # US dnsproxy -> Cloudflare Gateway DoH
+```
+
+Both should be global nameservers (no split-domain restriction).  `Use with exit
+node` may remain enabled.
+
+Keep:
+
+```text
+MagicDNS = ON
+Override DNS servers = ON
+```
+
+The Cloudflare tenant-specific DoH hostname is the portable authentication path
+used by both relays; the raw `172.64.36.x` location IPs are not required on
+clients.
