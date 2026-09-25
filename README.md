@@ -80,3 +80,29 @@ nslookup example.com 100.x.y.z
 ## Notes
 
 Tailscale App Connectors are for routing traffic to applications by domain; they are not an ad-blocking DNS engine. For whole-tailnet DNS filtering, **Global nameserver + Override DNS servers** is the appropriate Tailscale mechanism.
+
+
+## Dual-node DNS relay (KR + US)
+
+For redundancy, install the same relay on both Tailscale servers:
+
+- `kr.dongri.me`
+- `us.dongri.me`
+
+Run the same installer on each server. Each instance binds only to that server's own Tailscale IPv4 address and forwards to the same Cloudflare Gateway DoH endpoint, so the filtering policy stays identical.
+
+After both are running, add **both Tailscale 100.x addresses** as Tailscale Global nameservers and enable **Override DNS servers**.
+
+Tailscale/modern OS resolvers do not guarantee strict primary/secondary ordering; they may race or reorder resolvers. Because both nodes use the same Cloudflare Gateway policy, either answer is acceptable. In Korea the KR node will often be faster, while the US node provides redundancy.
+
+Known US node:
+
+```text
+us.dongri.me -> 100.94.3.111
+```
+
+Get the KR Tailscale IPv4 after installation with:
+
+```bash
+tailscale ip -4 | head -n1
+```
