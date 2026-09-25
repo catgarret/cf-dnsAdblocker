@@ -110,13 +110,92 @@ chmod 0755 /usr/local/libexec/tailscale-dnsproxy-run
 # Preflight: port 53 on the Tailscale IP must be free.  Do not silently kill an
 # existing DNS server; print the owner so the operator can decide whether to
 # integrate with or replace it.
-if ss -H -lntup 2>/dev/null | grep -Fq "${TS_IP}:53"; then
+if ss -H -lntup 2>/dev/null | grep -Fq "${TS_IP}:53" || \
+   ss -H -lntup 2>/dev/null | grep -Eq '(^|[[:space:]])(0\.0\.0\.0|\[::\]):53([[:space:]]|$)'; then
+  echo
+  echo "Port 53 is already served on this host. Checking whether the existing resolver"
+  echo "answers through the Tailscale address ${TS_IP} before changing anything..."
+
+  if dig @"${TS_IP}" example.com A +time=3 +tries=1 +short | grep -qE '^[0-9]+(\.[0-9]+){3}
+cat >/etc/systemd/system/tailscale-dnsproxy.service <<'UNIT'
+[Unit]
+Description=Tailscale-only DNS relay to Cloudflare Gateway DoH
+After=network-online.target tailscaled.service
+Wants=network-online.target tailscaled.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/libexec/tailscale-dnsproxy-run
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+systemctl daemon-reload
+systemctl stop tailscale-dnsproxy.service 2>/dev/null || true
+systemctl reset-failed tailscale-dnsproxy.service 2>/dev/null || true
+systemctl enable --now tailscale-dnsproxy.service
+
+# Give systemd a moment to surface bind/TLS/config errors.
+sleep 2
+if ! systemctl is-active --quiet tailscale-dnsproxy.service; then
+  echo "tailscale-dnsproxy failed to start." >&2
+  systemctl --no-pager --full status tailscale-dnsproxy.service || true
+  journalctl -u tailscale-dnsproxy.service -n 50 --no-pager || true
+  exit 1
+fi
+
+echo
+echo "Testing local relay through Tailscale address ${TS_IP}..."
+dig @"${TS_IP}" example.com A +time=4 +tries=1 +short >/tmp/tailscale-dnsproxy-test.txt
+if [[ ! -s /tmp/tailscale-dnsproxy-test.txt ]]; then
+  echo "DNS test returned no A record for example.com." >&2
+  journalctl -u tailscale-dnsproxy.service -n 50 --no-pager || true
+  exit 1
+fi
+
+echo
+echo "============================================================"
+echo " Tailscale DNS relay installed successfully"
+echo " dnsproxy: $(/usr/local/bin/dnsproxy --version 2>/dev/null || true)"
+echo " Nameserver: ${TS_IP}"
+echo " Upstream:   ${DOH_URL}"
+echo "============================================================"
+echo
+systemctl --no-pager --full status tailscale-dnsproxy.service
+echo
+ss -lntup | grep -F "${TS_IP}:53" || true
+echo
+echo "example.com test:"
+cat /tmp/tailscale-dnsproxy-test.txt
+; then
+    echo
+    echo "Existing DNS service is already reachable at ${TS_IP}:53."
+    echo "Leaving it untouched; a second dnsproxy instance is unnecessary."
+    echo
+    echo "Current :53 listeners:"
+    ss -H -lntup 2>/dev/null | grep -E '(:53[[:space:]]|:53$)' || true
+    echo
+    echo "If this is AdGuard Home / Pi-hole / another managed resolver, configure its"
+    echo "upstream to the desired Cloudflare Gateway DoH endpoint instead of replacing it."
+    exit 0
+  fi
+
   echo >&2
-  echo "Port 53 on ${TS_IP} is already in use:" >&2
-  ss -H -lntup 2>/dev/null | grep -F "${TS_IP}:53" >&2 || true
-  echo >&2
-  echo "Also showing all listeners on :53 for context:" >&2
-  ss -H -lntup 2>/dev/null | grep -E '(^|:)53([[:space:]]|$)' >&2 || true
+  echo "Port 53 is occupied but the existing resolver did not answer on ${TS_IP}:53:" >&2
+  ss -H -lntup 2>/dev/null | grep -E '(:53[[:space:]]|:53$)' >&2 || true
   echo >&2
   echo "Refusing to stop or overwrite the existing DNS service automatically." >&2
   exit 2
