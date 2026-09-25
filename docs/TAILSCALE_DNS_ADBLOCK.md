@@ -428,11 +428,34 @@ Then ensure the US node's advertised subnet routes are approved (or covered by a
 
 
 
-## 14. Repoint KR AdGuard Home to the existing Cloudflare Gateway forwarder
+## 14. Configure KR AdGuard Home for deterministic Gateway filtering
 
 The existing KR AdGuard Home listener originally used multiple public resolvers
-in parallel.  To make KR and US apply the same Cloudflare Gateway policy, use
-the existing `dns-forwarder` container as the sole AdGuard Home upstream.
+in parallel.  It was temporarily pointed at the existing `dns-forwarder`
+container, but inspection showed that `dns-forwarder` itself has multiple
+upstreams, including plain-IP Cloudflare endpoints.  That means not every query
+is guaranteed to traverse the tenant-specific Cloudflare Gateway policy.
+
+The final KR design therefore points AdGuard Home **directly** at the Gateway
+DoH endpoint:
+
+```text
+client
+  -> 100.121.219.35:53
+  -> AdGuard Home
+  -> https://yrx058qv17.cloudflare-gateway.com/dns-query
+```
+
+For availability, AdGuard Home also gets encrypted public-DNS fallbacks that are
+only used if the primary Gateway transport fails:
+
+```text
+https://cloudflare-dns.com/dns-query
+https://dns.google/dns-query
+```
+
+A policy block from Cloudflare Gateway is a valid DNS response, so it does not
+trigger this fallback.
 
 Run on KR:
 
@@ -442,15 +465,9 @@ curl -fsSL https://raw.githubusercontent.com/catgarret/cf-dnsAdblocker/main/scri
 sudo bash /tmp/configure-kr-adguard-upstream.sh
 ```
 
-The helper auto-detects the current `dns-forwarder` container IP, tests it,
-backs up `AdGuardHome.yaml`, replaces only `upstream_dns`, restarts the
-container, and verifies DNS through the KR Tailscale address.
+The helper backs up `AdGuardHome.yaml`, replaces only the primary/fallback DNS
+upstream blocks, restarts AdGuard Home, waits for DNS to return, and verifies
+both a normal domain and a known blocked domain.
 
-At the time of inspection, the forwarder address was `172.19.0.6`, but the
-script intentionally re-detects it because Docker bridge addresses can change
-after recreation.
-
-A previous test of `app-measurement.com` through KR returned `0.0.0.0`.
-That confirms filtering at the AdGuard Home layer, but does not by itself prove
-that the query traversed Cloudflare Gateway; repointing the upstream makes the
-Gateway path deterministic.
+The existing `dns-forwarder` container is intentionally left untouched because
+it can continue serving `dns.dongri.me` independently.
