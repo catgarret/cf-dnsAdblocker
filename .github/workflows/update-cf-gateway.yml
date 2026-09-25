@@ -2,18 +2,22 @@ name: Update Cloudflare Gateway filter lists
 
 on:
   schedule:
-    # Daily at 03:17 UTC (12:17 KST). Upstream also has an open request
-    # to move the default schedule from weekly to daily.
-    - cron: "17 3 * * *"
+    # Twice daily: 12:17 and 00:17 KST.
+    - cron: "17 3,15 * * *"
   push:
     branches:
       - main
     paths:
       - ".github/workflows/update-cf-gateway.yml"
+      - "lists/**"
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: cloudflare-gateway-filter-update
+  cancel-in-progress: false
 
 env:
   NODE_ENV: production
@@ -23,39 +27,89 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
+      - name: Checkout this configuration repository
+        uses: actions/checkout@v6
+        with:
+          path: config-repo
+
       - name: Checkout current CGPS v1
         uses: actions/checkout@v6
         with:
           repository: mrrfv/cloudflare-gateway-pihole-scripts
           ref: v1
+          path: cgps
 
       - name: Install current Node.js LTS
         uses: actions/setup-node@v6
         with:
           node-version: "lts/*"
           cache: npm
+          cache-dependency-path: cgps/package-lock.json
 
       - name: Install npm dependencies
+        working-directory: cgps
         run: npm ci
 
       - name: Download allowlists
+        working-directory: cgps
         run: npm run download:allowlist
-        env:
-          ALLOWLIST_URLS: ${{ vars.ALLOWLIST_URLS }}
+        # Leave ALLOWLIST_URLS unset so CGPS keeps its maintained default
+        # compatibility allowlists (banks, Android, Windows, macOS, etc.).
 
       - name: Download blocklists
-        run: npm run download:blocklist
+        working-directory: cgps
         env:
-          BLOCKLIST_URLS: ${{ vars.BLOCKLIST_URLS }}
+          BLOCKLIST_URLS: |
+            https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/multi.txt
+            https://adguardteam.github.io/HostlistsRegistry/assets/filter_15.txt
+            https://adguardteam.github.io/HostlistsRegistry/assets/filter_25.txt
+            https://adguardteam.github.io/HostlistsRegistry/assets/filter_1.txt
+            https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/native.samsung.txt
+            https://raw.githubusercontent.com/catgarret/cf-dnsAdblocker/main/lists/dongri-extra-blocklist.txt
+        run: npm run download:blocklist
 
-      - name: Show generated list statistics
+      - name: Verify curated Korean/app rules survived merge
+        working-directory: cgps
         shell: bash
         run: |
-          echo "blocklist lines: $(wc -l < blocklist.txt 2>/dev/null || echo 0)"
-          echo "allowlist lines: $(wc -l < allowlist.txt 2>/dev/null || echo 0)"
-          du -h blocklist.txt allowlist.txt 2>/dev/null || true
+          set -euo pipefail
+          required=(
+            "wcs.naver.com"
+            "serv.ds.kakao.com"
+            "ka.ds.kakao.com"
+            "tr.ds.kakao.com"
+            "kakaoad.com"
+            "app-ad.tiara.kakao.com"
+            "incoming.telemetry.mozilla.org"
+            "app-measurement.com"
+          )
+          for domain in "${required[@]}"; do
+            if ! grep -Fqi "${domain}" blocklist.txt; then
+              echo "::error::Required block domain missing after merge: ${domain}"
+              exit 1
+            fi
+          done
+
+      - name: Show generated list statistics
+        working-directory: cgps
+        shell: bash
+        run: |
+          set -euo pipefail
+          BLOCK_LINES="$(wc -l < blocklist.txt)"
+          ALLOW_LINES="$(wc -l < allowlist.txt)"
+          echo "blocklist lines: ${BLOCK_LINES}"
+          echo "allowlist lines: ${ALLOW_LINES}"
+          du -h blocklist.txt allowlist.txt
+          {
+            echo "## Cloudflare Gateway list refresh"
+            echo
+            echo "- Blocklist lines: ${BLOCK_LINES}"
+            echo "- Allowlist lines: ${ALLOW_LINES}"
+            echo "- Sources: HaGeZi Multi Normal + AdGuard DNS + YousList + filterslists-KO + HaGeZi Samsung Native + local curated rules"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Create or update Cloudflare Gateway rules and lists
+        working-directory: cgps
         run: npm run cloudflare-create
         env:
           BLOCK_PAGE_ENABLED: ${{ vars.BLOCK_PAGE_ENABLED }}
