@@ -48,6 +48,11 @@ if [[ ! -e "${DEFAULTS}" ]]; then
 SOURCE_URL="https://raw.githubusercontent.com/wpzzz/blocked-sites-in-south-korea/main/list.txt"
 MAX_ROUTES=9000
 
+# Resolve blocked domains through BOTH DNS relays that clients actually use.
+# This captures CDN/geolocation answers from KR and US instead of relying on
+# the US host's unrelated system resolver.
+RESOLVER_IPS="100.121.219.35 100.94.3.111"
+
 # Comma-separated static routes that must ALSO stay advertised by this node.
 # Example: EXTRA_STATIC_ROUTES="192.0.2.0/24,2001:db8::/48"
 EXTRA_STATIC_ROUTES=""
@@ -64,10 +69,12 @@ DEFAULTS="/etc/default/tailscale-warning-bypass"
 LOCAL_LIST="${CONF_DIR}/domains.txt"
 SOURCE_URL_DEFAULT="https://raw.githubusercontent.com/wpzzz/blocked-sites-in-south-korea/main/list.txt"
 MAX_ROUTES_DEFAULT=9000
+RESOLVER_IPS_DEFAULT="100.121.219.35 100.94.3.111"
 
 [[ -r "${DEFAULTS}" ]] && source "${DEFAULTS}"
 SOURCE_URL="${SOURCE_URL:-$SOURCE_URL_DEFAULT}"
 MAX_ROUTES="${MAX_ROUTES:-$MAX_ROUTES_DEFAULT}"
+RESOLVER_IPS="${RESOLVER_IPS:-$RESOLVER_IPS_DEFAULT}"
 EXTRA_STATIC_ROUTES="${EXTRA_STATIC_ROUTES:-}"
 
 TMP="$(mktemp -d)"
@@ -82,11 +89,15 @@ echo "Resolving ${DOMAIN_COUNT} domains..."
 
 resolve_one() {
   d="$1"
-  dig +time=2 +tries=1 +short A "$d" 2>/dev/null | awk -v d="$d" 'NF {print "4", $0, d}'
-  dig +time=2 +tries=1 +short AAAA "$d" 2>/dev/null | awk -v d="$d" 'NF {print "6", $0, d}'
+  for r in $RESOLVER_IPS; do
+    dig @"$r" +time=2 +tries=1 +short A "$d" 2>/dev/null       | awk -v d="$d" -v r="$r" 'NF {print "4", $0, d, r}'
+    dig @"$r" +time=2 +tries=1 +short AAAA "$d" 2>/dev/null       | awk -v d="$d" -v r="$r" 'NF {print "6", $0, d, r}'
+  done
 }
 export -f resolve_one
+export RESOLVER_IPS
 
+echo "Using client-facing resolvers: $RESOLVER_IPS"
 xargs -r -n1 -P32 bash -c 'resolve_one "$1"' _ < "$TMP/domains.txt"   > "$TMP/resolved.raw" || true
 
 python3 - "$TMP/resolved.raw" "$TMP/routes.txt" <<'PY'
