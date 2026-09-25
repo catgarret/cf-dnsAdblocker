@@ -149,3 +149,31 @@ sudo journalctl -u tailscale-warning-bypass.service -n 100 --no-pager
 3. The community list is not guaranteed complete, so a newly blocked domain may still need to be added locally.
 4. A block enforced by the destination/CDN itself can behave differently from Korean ISP-level `warning.or.kr` filtering. US egress often changes the result when the restriction is based on Korean source IP, but it cannot override a destination that refuses access independently.
 5. This design is intended to preserve normal direct Internet access. If truly every destination must be forced outside the Korean ISP, use an Exit Node instead.
+
+
+## DNS consistency with KR/US relays
+
+The client-facing Tailscale DNS configuration uses only:
+
+```text
+100.121.219.35   # KR
+100.94.3.111     # US
+```
+
+The warning-bypass refresher therefore resolves every blocked domain through
+**both** of those resolvers and merges the returned A/AAAA addresses before
+advertising routes.  This matters for CDN-backed domains: resolving only from
+the US host's unrelated system resolver can return a different edge IP than a
+Galaxy using the KR resolver, which would make the selective route miss.
+
+Default resolver setting:
+
+```bash
+RESOLVER_IPS="100.121.219.35 100.94.3.111"
+```
+
+It can be changed in:
+
+```text
+/etc/default/tailscale-warning-bypass
+```
