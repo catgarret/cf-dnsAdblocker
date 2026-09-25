@@ -241,3 +241,53 @@ If both servers are replaced:
 7. set Galaxy Private DNS to Automatic;
 8. run the GitHub filter workflow manually once;
 9. verify normal DNS and one known blocked domain.
+
+
+## 12. Availability-first / fail-open behavior
+
+This setup is intentionally biased toward **keeping Internet access available**.
+
+Each KR/US relay uses the Cloudflare Gateway DoH endpoint as its normal upstream. If that upstream is unavailable or returns a transport-level failure, `dnsproxy` falls back to encrypted public DNS:
+
+```text
+https://cloudflare-dns.com/dns-query
+https://dns.google/dns-query
+```
+
+That means:
+
+- normal state: Cloudflare Gateway filtering is enforced;
+- Gateway outage / TLS failure / upstream transport failure: DNS still works, but ad-blocking can temporarily be bypassed;
+- a domain that Cloudflare Gateway intentionally blocks is still treated as a valid DNS response and does **not** trigger fallback.
+
+The two independent Tailscale DNS relays (KR + US) add another layer of redundancy.
+
+### Android VPN lockdown setting
+
+Tailscale without an Exit Node is a split-tunnel VPN. On Android, **Block connections without VPN** (VPN lockdown mode) should be **OFF** if no Exit Node is selected. If lockdown is ON, Android can force all Internet traffic into the Tailscale VPN interface even though Tailscale is not acting as a full Internet gateway, which can make the Internet appear blocked.
+
+Samsung / Galaxy path (wording may vary by One UI version):
+
+```text
+Settings
+-> Connections
+-> More connection settings
+-> VPN
+-> gear icon next to Tailscale
+-> Block connections without VPN = OFF
+```
+
+`Always-on VPN` may remain enabled if desired; the important setting for split-tunnel use is that `Block connections without VPN` is disabled unless an Exit Node is intentionally being used.
+
+### Tailscale "DNS unavailable" health warning
+
+A separate Android Tailscale warning named **DNS unavailable** can be shown when a custom/private tailnet DNS resolver is configured, even when DNS queries actually work. This is a Tailscale Android health-check/UI issue and cannot be safely suppressed from the DNS server configuration.
+
+Do not hide this warning by weakening routing or forcing an Exit Node. Instead verify actual DNS reachability:
+
+```bash
+dig @<KR_OR_US_TAILSCALE_IP> example.com A +short
+```
+
+If DNS works and ordinary Internet access works, the warning may be cosmetic. If DNS actually fails, check both relay services and Tailscale reachability.
+
