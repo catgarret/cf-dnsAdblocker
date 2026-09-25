@@ -233,14 +233,15 @@ Those require app/browser-level filtering rather than more DNS entries.
 If both servers are replaced:
 
 1. install Tailscale and join the tailnet;
-2. run the relay installer on KR;
-3. run it on US;
+2. on KR, restore/start the existing Docker AdGuard Home stack and run `configure-kr-adguard-gateway.sh`;
+3. on US, run `install-tailscale-dns-relay.sh`;
 4. record both new `100.x` addresses;
-5. replace the Global nameserver addresses in Tailscale DNS;
+5. add both addresses as Global nameservers in Tailscale DNS;
 6. enable Override DNS servers;
-7. set Galaxy Private DNS to Automatic;
+7. set Galaxy Private DNS to Automatic and keep Tailscale DNS enabled;
 8. run the GitHub filter workflow manually once;
-9. verify normal DNS and one known blocked domain.
+9. verify normal DNS and one known blocked domain against both resolvers;
+10. if selective Korean ISP-block bypass is desired, install `install-tailscale-warning-bypass.sh` on US only.
 
 
 ## 12. Availability-first / fail-open behavior
@@ -313,8 +314,8 @@ Also present:
 dns-forwarder
 image: adguard/dnsproxy:latest
 upstreams:
-  tls://yrx058qv17.cloudflare-gateway.com
-  https://yrx058qv17.cloudflare-gateway.com/dns-query
+  tls://YOUR-ID.cloudflare-gateway.com
+  https://YOUR-ID.cloudflare-gateway.com/dns-query
   172.64.36.1
   172.64.36.2
   [2a06:98c1:54::23:3b18]
@@ -342,4 +343,86 @@ This removes only artifacts created by `install-tailscale-dns-relay.sh`:
 - the standalone host `/usr/local/bin/dnsproxy` when no other systemd unit references it
 
 It intentionally leaves Docker and the existing DNS containers untouched.
+
+
+## Post-cleanup sequence for the current deployment
+
+Current known resolver addresses:
+
+```text
+KR  100.121.219.35  -> existing Docker AdGuard Home
+US  100.94.3.111    -> host-level tailscale-dnsproxy
+```
+
+After cleaning the failed KR host-level relay attempt:
+
+### A. Point KR AdGuard Home at the same Cloudflare Gateway policy
+
+Run on KR:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/catgarret/cf-dnsAdblocker/main/scripts/configure-kr-adguard-gateway.sh \
+  -o /tmp/configure-kr-adguard-gateway.sh && \
+sudo env DOH_URL='https://YOUR-ID.cloudflare-gateway.com/dns-query' \
+  bash /tmp/configure-kr-adguard-gateway.sh
+```
+
+The script backs up `AdGuardHome.yaml`, makes Cloudflare Gateway the sole normal upstream, sets encrypted Cloudflare + Google DoH as fail-open fallbacks, restarts AdGuard Home, and verifies DNS through the KR Tailscale address.
+
+The existing `dns-forwarder` container is left untouched because it may still serve `dns.dongri.me` / external DoT/DoH paths.
+
+### B. Verify both resolvers
+
+```bash
+dig @100.121.219.35 example.com A +short
+dig @100.94.3.111 example.com A +short
+
+dig @100.121.219.35 app-measurement.com A
+dig @100.94.3.111 app-measurement.com A
+```
+
+Both normal queries must resolve.  The tracker query should show the Cloudflare Gateway block behavior configured for the account.
+
+### C. Tailscale admin DNS
+
+Add both as Global / Custom nameservers:
+
+```text
+100.121.219.35
+100.94.3.111
+```
+
+Enable **Override DNS servers**.  Keep MagicDNS enabled if tailnet hostnames are used.
+
+### D. Clients
+
+Galaxy:
+
+```text
+Android Private DNS = Automatic
+Tailscale -> Use Tailscale DNS settings = On
+Exit Node = None
+Block connections without VPN = Off
+```
+
+iPhone / iPad / macOS:
+
+```text
+Tailscale DNS = On
+Exit Node = None
+```
+
+Android, iOS, macOS, tvOS, and Windows accept Tailscale subnet routes by default. Linux clients need `tailscale set --accept-routes=true`.
+
+### E. Selective `warning.or.kr` bypass
+
+Install only on US after DNS is confirmed:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/catgarret/cf-dnsAdblocker/main/scripts/install-tailscale-warning-bypass.sh \
+  -o /tmp/install-tailscale-warning-bypass.sh && \
+sudo bash /tmp/install-tailscale-warning-bypass.sh
+```
+
+Then ensure the US node's advertised subnet routes are approved (or covered by an `autoApprovers.routes` policy).  Clients keep **Exit Node = None**; only matching destination IPs use the US subnet router.
 
