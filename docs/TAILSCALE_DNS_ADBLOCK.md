@@ -293,40 +293,53 @@ If DNS works and ordinary Internet access works, the warning may be cosmetic. If
 
 
 
-## 13. Existing KR DNS stack detected
+## KR node: existing Docker DNS stack
 
-On the KR node, port 53 is already published by Docker and a DNS query to the
-node's Tailscale address succeeds.  The observed stack is:
+The KR node already has a working Docker-based DNS stack and must **not** run the host-level `tailscale-dnsproxy.service`.
 
-```text
-AdGuard Home container
-  - publishes TCP/UDP 53 on 0.0.0.0 and [::]
-  - therefore already answers on the node's Tailscale IPv4
-
-dns-forwarder container
-  - AdGuardTeam/dnsproxy image
-  - likely used as an internal encrypted upstream/forwarder
-
-cloudflared container
-  - existing Cloudflare tunnel / DNS-related component
-```
-
-For this node, do **not** run a second systemd `tailscale-dnsproxy` on port 53.
-Reuse the existing AdGuard Home listener and point its upstream chain at the same
-Cloudflare Gateway DoH policy used by the US relay.
-
-Known KR tailnet resolver address at the time of setup:
+Observed working listener:
 
 ```text
-100.121.219.35
+KR Tailscale DNS: 100.121.219.35:53
+container: adguardhome
+image: adguard/adguardhome:latest
 ```
 
-Known US tailnet resolver address:
+A direct query to `100.121.219.35:53` returned a normal `NOERROR` response, so this address is already suitable as the KR Tailscale nameserver.
+
+Also present:
 
 ```text
-100.94.3.111
+dns-forwarder
+image: adguard/dnsproxy:latest
+upstreams:
+  tls://yrx058qv17.cloudflare-gateway.com
+  https://yrx058qv17.cloudflare-gateway.com/dns-query
+  172.64.36.1
+  172.64.36.2
+  [2a06:98c1:54::23:3b18]
+fallback:
+  129.154.52.136
 ```
 
-The installer has been updated so that if port 53 is already occupied *and* the
-existing resolver successfully answers through the node's Tailscale address, it
-exits successfully without killing or replacing that service.
+The AdGuard Home listener and the `dns-forwarder` container are part of the existing KR deployment and must not be removed by the host-relay cleanup.
+
+### Clean up the failed host-level relay attempt on KR
+
+Run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/catgarret/cf-dnsAdblocker/main/scripts/cleanup-host-tailscale-dns-relay.sh \
+  -o /tmp/cleanup-host-tailscale-dns-relay.sh && \
+sudo bash /tmp/cleanup-host-tailscale-dns-relay.sh
+```
+
+This removes only artifacts created by `install-tailscale-dns-relay.sh`:
+
+- `tailscale-dnsproxy.service`
+- `/usr/local/libexec/tailscale-dnsproxy-run`
+- `/etc/tailscale-dnsproxy`
+- the standalone host `/usr/local/bin/dnsproxy` when no other systemd unit references it
+
+It intentionally leaves Docker and the existing DNS containers untouched.
+
