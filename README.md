@@ -1,25 +1,82 @@
 # cf-dnsAdblocker
 
-Uses GitHub Actions to automatically refresh Cloudflare Gateway ad-blocking lists with [mrrfv/cloudflare-gateway-pihole-scripts](https://github.com/mrrfv/cloudflare-gateway-pihole-scripts).
+Cloudflare Gateway DNS filtering + a Tailscale-only DNS relay.
 
-## Schedule
+## Cloudflare Gateway filter refresh
 
-The workflow runs every Monday at 03:07 UTC and can also be started manually from GitHub Actions.
+This repository runs the current `mrrfv/cloudflare-gateway-pihole-scripts` v1 workflow.
 
-A keepalive job is included because GitHub may automatically disable scheduled workflows in inactive public repositories.
+### Schedule
 
-## Required repository secrets
+The filter refresh runs **daily at 03:17 UTC (12:17 KST)** and can also be started manually.
 
-- `CLOUDFLARE_API_TOKEN` — Cloudflare API token with the Zero Trust permissions required by CGPS.
-- `CLOUDFLARE_ACCOUNT_ID` — Cloudflare account ID.
-- `CLOUDFLARE_LIST_ITEM_LIMIT` — optional list-item limit; CGPS defaults apply when omitted.
-- `PING_URL` — optional health-check URL called after a successful refresh.
-- `DISCORD_WEBHOOK_URL` — optional CGPS notification webhook.
+The upstream project currently ships a weekly example schedule, but there is an open upstream request to make it daily. Daily refresh is used here so frequently changing ad/tracker lists do not stay stale for a week.
 
-## Optional repository variables
+### Required repository secrets
+
+- `CLOUDFLARE_API_TOKEN`
+- `CLOUDFLARE_ACCOUNT_ID`
+- `CLOUDFLARE_LIST_ITEM_LIMIT` — optional; CGPS defaults apply when omitted.
+- `PING_URL` — optional health-check URL.
+- `DISCORD_WEBHOOK_URL` — optional notification webhook.
+
+### Optional repository variables
 
 - `ALLOWLIST_URLS` — one allowlist URL per line.
 - `BLOCKLIST_URLS` — one blocklist URL per line.
-- `BLOCK_PAGE_ENABLED` — enables the CGPS block page when supported by the Cloudflare account.
+- `BLOCK_PAGE_ENABLED`
 
-The workflow checks out the current upstream `v1` branch and uses the current Node.js LTS runtime instead of pinning an obsolete Node version.
+If `BLOCKLIST_URLS` is empty, CGPS uses its current recommended lists. If stronger filtering is desired, set a curated list explicitly rather than stacking multiple overlapping lists and wasting the Cloudflare Gateway item quota.
+
+## Tailscale DNS architecture
+
+Android Private DNS (DoT) can conflict with Tailscale/MagicDNS. Instead of making Android reach the public Private DNS hostname while Tailscale is active, use a DNS resolver inside the tailnet:
+
+```text
+phone / iPad / Mac
+  -> Tailscale DNS
+  -> 100.x.y.z:53 on a tailnet server
+  -> encrypted DoH
+  -> Cloudflare Gateway
+  -> CGPS ad/tracker rules
+```
+
+The client-to-server DNS packet is protected by Tailscale's WireGuard tunnel. The server-to-Cloudflare leg uses DoH.
+
+### Install relay on a Linux Tailscale server
+
+`scripts/install-tailscale-dns-relay.sh` installs the current AdGuardTeam `dnsproxy` release and binds it only to the host's Tailscale IPv4 address.
+
+Example:
+
+```bash
+sudo DOH_URL='https://YOUR_LOCATION.cloudflare-gateway.com/dns-query' \
+  bash scripts/install-tailscale-dns-relay.sh
+```
+
+Then, in the Tailscale admin console:
+
+1. DNS -> Global nameservers -> Add nameserver -> Custom.
+2. Enter the server's `100.x.y.z` Tailscale IPv4 address.
+3. Enable **Override DNS servers**.
+4. Keep MagicDNS enabled if you use tailnet hostnames.
+5. Ensure the tailnet policy permits clients to reach that server on TCP/UDP 53.
+
+On Android, set system **Private DNS** to **Automatic** (or Off) while using this design. Tailscale becomes the DNS control plane, so a separate Android Private DNS hostname is unnecessary and can conflict with the VPN DNS configuration.
+
+### Verify on the server
+
+```bash
+sudo ss -lntup | grep ':53'
+sudo journalctl -u tailscale-dnsproxy -f
+```
+
+From another tailnet device:
+
+```bash
+nslookup example.com 100.x.y.z
+```
+
+## Notes
+
+Tailscale App Connectors are for routing traffic to applications by domain; they are not an ad-blocking DNS engine. For whole-tailnet DNS filtering, **Global nameserver + Override DNS servers** is the appropriate Tailscale mechanism.
